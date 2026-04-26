@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>eVTOL 轨迹优化 · 研究报告</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Outfit:wght@200..800&family=JetBrains+Mono:wght@400..600&display=swap" rel="stylesheet">
+<script>tailwind.config={darkMode:'class',theme:{extend:{fontFamily:{display:['Outfit','sans-serif'],mono:['JetBrains Mono','monospace']},colors:{surface:{dark:'#0a0a0f',card:'#14141f',border:'#1e1e2e'},accent:{cyan:'#06b6d4',emerald:'#10b981',rose:'#f43f5e',amber:'#f59e0b'}},animation:{shimmer:'shimmer 3s ease-in-out infinite'},keyframes:{shimmer:{'0%,100%':{backgroundPosition:'200% 0'},'50%':{backgroundPosition:'-200% 0'}}}}}}}</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}html{scroll-behavior:smooth}
+body{font-family:'Outfit',sans-serif;background:#0a0a0f;color:#e4e4e7}
+.gc{background:rgba(255,255,255,.03);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.06);box-shadow:inset 0 1px 0 rgba(255,255,255,.05);transition:all .4s cubic-bezier(.16,1,.3,1);border-radius:1rem}
+.gc:hover{border-color:rgba(6,182,212,.2);box-shadow:inset 0 1px 0 rgba(6,182,212,.1),0 8px 32px rgba(6,182,212,.06);transform:translateY(-2px)}
+.gn{position:fixed;top:0;left:0;right:0;z-index:50;background:rgba(10,10,15,.8);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-bottom:1px solid rgba(255,255,255,.04);padding:.75rem 1.5rem}
+.st{background:linear-gradient(135deg,#fafafa,#06b6d4,#10b981,#fafafa);background-size:300% 100%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:shimmer 6s ease-in-out infinite}
+.sv{font-family:'JetBrains Mono',monospace;font-weight:600;letter-spacing:-.02em}
+.pt{display:inline-flex;align-items:center;padding:.25rem .75rem;border-radius:9999px;font-size:.75rem;font-weight:500;letter-spacing:.05em}
+.sd{height:1px;background:linear-gradient(90deg,transparent,rgba(6,182,212,.3),transparent);margin:4rem 0}
+.mb{display:inline-flex;align-items:center;gap:.375rem;padding:.25rem .75rem;border-radius:.375rem;font-size:.8125rem;font-family:'JetBrains Mono',monospace}
+.mlf{overflow-x:auto;padding:1rem;background:rgba(255,255,255,.02);border-radius:.5rem;border:1px solid rgba(255,255,255,.04);margin:.75rem 0}
+.mlf code{font-family:'JetBrains Mono',monospace;font-size:.8rem;line-height:1.6;color:#a1a1aa}
+figure{border-radius:.75rem;overflow:hidden;transition:all .4s cubic-bezier(.16,1,.3,1)}
+figure:hover{transform:scale(1.01);box-shadow:0 12px 48px rgba(0,0,0,.3)}
+figcaption{font-size:.75rem;color:rgba(161,161,170,.4);margin-top:.5rem}
+@media(max-width:768px){.hg{grid-template-columns:1fr!important}}
+@keyframes shimmer{0%,100%{background-position:200% 0}50%{background-position:-200% 0}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideUp{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:translateY(0)}}
+</style></head><body>
+
+<nav class="gn flex items-center justify-between max-w-7xl mx-auto w-full">
+  <a href="#" class="text-sm font-semibold tracking-wider text-zinc-400 hover:text-zinc-200 transition-colors">EVTOL OPT</a>
+  <div class="hidden md:flex items-center gap-6">
+    <a href="#formulation" class="text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors">模型</a>
+    <a href="#problem" class="text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors">问题</a>
+    <a href="#oscillation" class="text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors">电机</a>
+    <a href="#convergence" class="text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors">管道</a>
+    <a href="#ydrift" class="text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors">Y漂移</a>
+    <a href="#results" class="text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors">结果</a>
+  </div>
+  <button id="tt" class="p-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-all text-zinc-400">
+    <svg id="mi" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+    <svg id="si" class="w-4 h-4 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+  </button>
+</nav>
+
+<!-- Hero -->
+<section style="min-height:90dvh;display:flex;align-items:center;padding-top:5rem">
+<div style="position:absolute;inset:0;overflow:hidden;pointer-events:none">
+<div style="position:absolute;top:25%;left:-8rem;width:24rem;height:24rem;background:rgba(6,182,212,.08);border-radius:50%;filter:blur(128px)"></div>
+<div style="position:absolute;bottom:25%;right:-8rem;width:24rem;height:24rem;background:rgba(16,185,129,.08);border-radius:50%;filter:blur(128px)"></div>
+</div>
+<div class="max-w-7xl mx-auto px-6 w-full">
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center hg">
+<div style="animation:fadeIn .8s ease-out forwards">
+<div class="flex items-center gap-3 mb-4">
+<span class="pt bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">研究报告</span>
+<span class="pt bg-zinc-800/50 text-zinc-400 border border-zinc-700/30">2026-04-26</span>
+</div>
+<h1 class="text-5xl md:text-7xl font-bold tracking-tighter leading-none mb-6"><span class="st">eVTOL<br>轨迹<br>优化</span></h1>
+<p class="text-lg text-zinc-500 max-w-[40ch] leading-relaxed mb-8">基于 CasADi 和 IPOPT 的六旋翼 eVTOL 轨迹优化管道——解决电机振荡、侧向漂移与法规合规性三大核心问题。</p>
+<div class="flex flex-wrap gap-3">
+<a href="#formulation" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all text-sm font-medium">阅读报告<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg></a>
+<a href="#results" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-all text-sm font-medium text-zinc-400 hover:text-zinc-200">最终指标</a>
+</div></div>
+<div class="grid grid-cols-2 gap-4">
+<div class="gc p-6 space-y-2"><div class="text-xs font-medium text-zinc-500 tracking-wide uppercase">SOC 保留</div><div class="sv text-3xl text-emerald-400">97.2<span class="text-lg">%</span></div><div class="text-xs text-zinc-600">终态电量</div></div>
+<div class="gc p-6 space-y-2"><div class="text-xs font-medium text-zinc-500 tracking-wide uppercase">Y漂移</div><div class="sv text-3xl text-cyan-400">0.16<span class="text-lg">m</span></div><div class="text-xs text-zinc-600">50 倍抑制</div></div>
+<div class="gc p-6 space-y-2"><div class="text-xs font-medium text-zinc-500 tracking-wide uppercase">最大 ω̇</div><div class="sv text-3xl text-amber-400">83<span class="text-lg"> rad/s²</span></div><div class="text-xs text-zinc-600">全部 &lt;200</div></div>
+<div class="gc p-6 space-y-2"><div class="text-xs font-medium text-zinc-500 tracking-wide uppercase">飞行时间</div><div class="sv text-3xl text-rose-400">41.0<span class="text-lg">s</span></div><div class="text-xs text-zinc-600">射程 500m</div></div>
+</div></div></div>
+</section>
+
+<div class="max-w-7xl mx-auto px-6">
+<!-- ===== Part 2: 正文内容 ===== -->
+
+<!-- 1. 数学模型 -->
+<section id="formulation" style="padding-top:6rem;margin-bottom:4rem" data-observe>
+<div class="flex items-center gap-3 mb-8">
+<span class="pt bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">§1</span>
+<h2 class="text-3xl font-bold tracking-tight">数学模型表述</h2>
+</div>
+<p class="text-zinc-500 max-w-3xl mb-10 leading-relaxed">针对六旋翼 eVTOL 飞行器构建一个 13 状态、6 控制的最优控制问题。动力学包含刚体欧拉方程、前进比依赖的旋翼气动模型以及二次型电池模型。</p>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+<div class="gc p-6">
+<h3 class="text-lg font-semibold mb-4 text-white">状态与控制向量</h3>
+<p class="mb-3 text-sm">状态 <span class="mi text-xs">x = [Qb, p, q, r, u, v, w, φ, θ, ψ, x, y, z]ᵀ</span></p>
+<div class="mlf text-xs"><code>Qb: 电池电荷量 (Ah)<br>p,q,r: 体轴角速率 (rad/s)<br>u,v,w: 体轴线速度 (m/s)<br>φ,θ,ψ: 欧拉角 (rad)<br>x,y,z: 惯性系位置 (m, NED)</code></div>
+<p class="mt-3 mb-2 text-sm">控制 <span class="mi text-xs">u = [ω₁ … ω₆]ᵀ</span></p>
+<div class="mlf text-xs"><code>六旋翼转速，约束范围 [10, 350] rad/s</code></div>
+</div>
+
+<div class="gc p-6">
+<h3 class="text-lg font-semibold mb-4 text-white">刚体动力学</h3>
+<div class="mlf text-xs"><code>Qb_dot = Ib / 3600<br><br>p,q,r_dot = J⁻¹( [L,M,N]ᵀ − ω×Jω )<br><br>u,v,w_dot = −ω×V + g·R⁻¹e₃ + F/M<br><br>φ,θ,ψ_dot = T(φ,θ)·[p,q,r]ᵀ<br><br>x,y,z_dot = R(φ,θ,ψ)ᵀ·[u,v,w]ᵀ</code></div>
+</div>
+
+<div class="gc p-6">
+<h3 class="text-lg font-semibold mb-4 text-white">旋翼力与力矩</h3>
+<p class="text-sm mb-2">前进比依赖系数：</p>
+<div class="mlf text-xs"><code>Jᵢ = 2πV / (ωᵢ·Dm)<br><br>ct(J) = −0.1039J² − 0.0763J + 0.0848<br>cm(J) = −0.0154J² + 0.0042J + 0.0042<br><br>T = Σ ρ·Dm⁴·ct·ω² / (4π²)<br>L = −Σ Tᵢ·Lyᵢ<br>M = Σ Tᵢ·Lxᵢ<br>N = ρ·Dm⁵·Σ cm·σᵢ·ω² / (4π²)</code></div>
+</div>
+
+<div class="gc p-6">
+<h3 class="text-lg font-semibold mb-4 text-white">电池模型</h3>
+<p class="text-sm mb-2">SOC → 开路电压 → 电流：</p>
+<div class="mlf text-xs"><code>SOC = 1 − Qb / Qmax<br>Uoc(SOC) = c₁·ln(SOC) + e^(−c₂·SOC) + c₃·SOC³ + c₄<br><br>电机功率 → 二次 Ib 方程：<br>−Rbatt·Ib² + (Uoc − k·Qb_adj)·Ib − Pb/(Ns·Np) = 0</code></div>
+</div>
+</div>
+
+<div class="gc p-6">
+<h3 class="text-lg font-semibold mb-4 text-white">最优控制问题</h3>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<div>
+<p class="text-sm font-medium text-cyan-400 mb-2">目标函数</p>
+<div class="mlf text-xs"><code>J = battery_usage<br>  + 0.3 · time_cost<br>  + 0.005 · angular_accel_penalty<br>  + 0.1 · motor_smoothness_penalty<br>  + wy · y²_drift_penalty  (wy=0.01)</code></div>
+</div>
+<div>
+<p class="text-sm font-medium text-amber-400 mb-2">关键约束</p>
+<div class="mlf text-xs"><code>• 动力学: RK4 连续性约束<br>• 控制量: ω ∈ [10, 350] rad/s<br>• 角加速度: |ω̇| ≤ 200 rad/s²<br>• 空域: z + 0.125x ≥ −28.6 (Phase 1-2)<br>• 爬升梯度: ≥ 4.5% (Ph2), ≥ 2.5% (Ph4)<br>• 速度: V ≥ 10 (Ph2-3), V ≥ 16 (Ph4)<br>• 终端: x ≥ 500 m, z ≤ −305 m</code></div>
+</div>
+</div>
+</div>
+<div class="sd"></div>
+</section>
+
+<!-- 2. 问题链 -->
+<section id="problem" style="padding-top:6rem;margin-bottom:4rem" data-observe>
+<div class="flex items-center gap-3 mb-8">
+<span class="pt bg-rose-500/10 text-rose-400 border border-rose-500/20">§2</span>
+<h2 class="text-3xl font-bold tracking-tight">问题链</h2>
+</div>
+<p class="text-zinc-500 max-w-3xl mb-8 leading-relaxed">从 MATLAB 迁移到 Python 过程中暴露了四个相互关联的问题。每个问题经过系统性诊断后，逐一用针对性修复方案解决。</p>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<div class="gc p-6">
+<div class="flex items-center gap-2 mb-3"><span class="pt bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[.6rem] px-1.5">P0</span><h3 class="text-base font-semibold">初始状态错误</h3></div>
+<p class="text-xs text-zinc-500 mb-3">Python 设 <span class="mi">z₀ = −31.5 m</span>（悬停高度），MATLAB 使用 <span class="mi">ε·1₁₃</span>（地面起始）。跳过了地面→悬停的转速斜坡。</p>
+<div class="mlf"><code style="font-size:.7rem">修复: z₀ = 0，递进式热启动求解</code></div>
+</div>
+
+<div class="gc p-6">
+<div class="flex items-center gap-2 mb-3"><span class="pt bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[.6rem] px-1.5">P0</span><h3 class="text-base font-semibold">缺少 h₁ 航点</h3></div>
+<p class="text-xs text-zinc-500 mb-3">适航要求在转换段前设置 h₁ = 3 m（FATO→悬停）。当前阶段直接从地面跳到 ~30.5 m。</p>
+<div class="mlf"><code style="font-size:.7rem">待办: 增加带 h₁ 约束的 Phase 1a</code></div>
+</div>
+
+<div class="gc p-6">
+<div class="flex items-center gap-2 mb-3"><span class="pt bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[.6rem] px-1.5">P1</span><h3 class="text-base font-semibold">Y方向漂移</h3></div>
+<p class="text-xs text-zinc-500 mb-3">优化器利用体轴耦合降低电池消耗，产生 y ∈ [−5, +3] m 的摆幅。</p>
+<div class="mlf"><code style="font-size:.7rem">修复: y² 软惩罚 (wy=0.01), 43.6 倍抑制</code></div>
+</div>
+
+<div class="gc p-6">
+<div class="flex items-center gap-2 mb-3"><span class="pt bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[.6rem] px-1.5">P1</span><h3 class="text-base font-semibold">电机转速振荡</h3></div>
+<p class="text-xs text-zinc-500 mb-3">Phase 3 峰值 ω̇ 达到 1216 rad/s²——远超无刷电机物理限制。</p>
+<div class="mlf"><code style="font-size:.7rem">修复: 递进式 ω̇ 边界 500 → 200 rad/s²</code></div>
+</div>
+</div>
+<div class="sd"></div>
+</section>
+
+<!-- 3. 电机振荡分析 -->
+<section id="oscillation" style="padding-top:6rem;margin-bottom:4rem" data-observe>
+<div class="flex items-center gap-3 mb-8">
+<span class="pt bg-amber-500/10 text-amber-400 border border-amber-500/20">§3</span>
+<h2 class="text-3xl font-bold tracking-tight">电机转速振荡</h2>
+</div>
+<p class="text-zinc-500 max-w-3xl mb-8 leading-relaxed">初始 Python 解存在严重的电机振荡——Phase 3 ω̇ 值超过 1200 rad/s²。我们采用三指标基准对物理可行性进行分类：角加速度、累计变化量和阶段间边界跳变。</p>
+
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-10">
+<div class="gc p-4 text-center"><div class="text-xs font-medium text-zinc-500 mb-1">平滑</div><div class="sv text-lg text-emerald-400">≤ 50</div><div class="text-xs text-zinc-600">rad/s²</div></div>
+<div class="gc p-4 text-center"><div class="text-xs font-medium text-zinc-500 mb-1">正常</div><div class="sv text-lg text-emerald-400">≤ 150</div><div class="text-xs text-zinc-600">rad/s²</div></div>
+<div class="gc p-4 text-center"><div class="text-xs font-medium text-zinc-500 mb-1">紧急</div><div class="sv text-lg text-amber-400">≤ 300</div><div class="text-xs text-zinc-600">rad/s²</div></div>
+<div class="gc p-4 text-center"><div class="text-xs font-medium text-zinc-500 mb-1">不可行</div><div class="sv text-lg text-rose-400">> 300</div><div class="text-xs text-zinc-600">rad/s²</div></div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+<figure><img src="fig1_motor_speeds.png" style="width:100%;display:block" alt="Motor speeds"><figcaption>图 1：六个电机转速全阶段时域</figcaption></figure>
+<figure><img src="fig8_wdot_summary.png" style="width:100%;display:block" alt="Angular acceleration"><figcaption>图 2：各阶段 |ω̇|——约束后全部 ≤ 83 rad/s²</figcaption></figure>
+</div>
+
+<div class="overflow-x-auto mb-8">
+<table class="w-full text-xs">
+<thead><tr class="border-b border-white/10"><th class="text-left py-3 px-3 font-medium text-zinc-400">阶段</th><th class="text-left py-3 px-3 font-medium text-zinc-400">ω̇ 最大值</th><th class="text-left py-3 px-3 font-medium text-zinc-400">边界跳变</th><th class="text-left py-3 px-3 font-medium text-zinc-400">等级</th></tr></thead>
+<tbody class="divide-y divide-white/5">
+<tr><td class="py-3 px-3">P1 (起飞)</td><td class="py-3 px-3 text-zinc-400">83</td><td class="py-3 px-3 text-zinc-400">11</td><td class="py-3 px-3"><span class="pt bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[.6rem]">正常</span></td></tr>
+<tr><td class="py-3 px-3">P2 (转换)</td><td class="py-3 px-3 text-zinc-400">27</td><td class="py-3 px-3 text-zinc-400">4</td><td class="py-3 px-3"><span class="pt bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[.6rem]">平滑</span></td></tr>
+<tr><td class="py-3 px-3">P3 (爬升)</td><td class="py-3 px-3 text-zinc-400">16</td><td class="py-3 px-3 text-zinc-400">1</td><td class="py-3 px-3"><span class="pt bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[.6rem]">平滑</span></td></tr>
+<tr><td class="py-3 px-3">P4 (巡航)</td><td class="py-3 px-3 text-zinc-400">5</td><td class="py-3 px-3 text-zinc-400">1</td><td class="py-3 px-3"><span class="pt bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[.6rem]">平滑</span></td></tr>
+<tr><td class="py-3 px-3">P5 (下降)</td><td class="py-3 px-3 text-zinc-400">21</td><td class="py-3 px-3 text-zinc-400">1</td><td class="py-3 px-3"><span class="pt bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[.6rem]">平滑</span></td></tr>
+</tbody>
+</table></div>
+
+<figure class="mb-8"><img src="fig7_phase5_detail.png" style="width:100%;display:block" alt="Phase 5 detail"><figcaption>图 3：Phase 5 详细视图——5 秒内下降 60 rad/s，但全部 ω̇ ≤ 21</figcaption></figure>
+<div class="sd"></div>
+</section>
+
+<!-- 5. 求解器收敛 -->
+<section id="convergence" style="padding-top:6rem;margin-bottom:4rem" data-observe>
+<div class="flex items-center gap-3 mb-8">
+<span class="pt bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">§4</span>
+<h2 class="text-3xl font-bold tracking-tight">求解器收敛管道</h2>
+</div>
+<p class="text-zinc-500 max-w-3xl mb-8 leading-relaxed">从 z=0 直接求解加上紧约束会导致 IPOPT 发散（NaN）。我们采用递进式热启动策略：从宽松约束开始，逐步收紧，并持久化中间解。</p>
+
+<div class="gc p-6 mb-8">
+<div class="flex flex-col md:flex-row items-stretch gap-4">
+<div class="flex-1 p-4 rounded-lg bg-white/5 border border-white/10"><div class="text-xs font-medium text-zinc-400 mb-1">Step 0</div><div class="text-sm font-semibold mb-2">人工初猜</div><div class="text-xs text-zinc-500">无 ω̇ 约束<br>建立粗略轨迹形状</div></div>
+<div class="flex items-center justify-center text-zinc-600 text-lg font-bold"><svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg></div>
+<div class="flex-1 p-4 rounded-lg bg-cyan-500/5 border border-cyan-500/10"><div class="text-xs font-medium text-cyan-400 mb-1">Step 2a</div><div class="text-sm font-semibold mb-2">ω̇ ≤ 500</div><div class="text-xs text-zinc-500">57 次迭代<br>~10 秒运行</div></div>
+<div class="flex items-center justify-center text-zinc-600 text-lg font-bold"><svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg></div>
+<div class="flex-1 p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/10"><div class="text-xs font-medium text-emerald-400 mb-1">Step 2b</div><div class="text-sm font-semibold mb-2">ω̇ ≤ 200 + y²</div><div class="text-xs text-zinc-500">1000 次迭代<br>~195 秒运行</div></div>
+</div>
+</div>
+
+<p class="text-sm text-zinc-600 mb-6 text-center max-w-2xl mx-auto">每一步从上一个 <span class="mi">.mat</span> 解文件热启动，通过独立测试脚本（<span class="mi">test_step2a.py / test_step2b.py</span>）验证收敛后再推进。</p>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+<figure><img src="fig2_xz_profile.png" style="width:100%;display:block" alt="XZ profile"><figcaption>图 4：XZ 纵向剖面——地面起始，射程 500 m，高度 305 m</figcaption></figure>
+<figure><img src="fig4_body_states.png" style="width:100%;display:block" alt="Body states"><figcaption>图 5：体轴角速率与欧拉角</figcaption></figure>
+</div>
+<div class="sd"></div>
+</section>
+<!-- ===== Part 3: 剩余章节 + 页脚 + JS ===== -->
+
+<!-- 6. Y方向漂移抑制 -->
+<section id="ydrift" style="padding-top:6rem;margin-bottom:4rem" data-observe>
+<div class="flex items-center gap-3 mb-8">
+<span class="pt bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">§5</span>
+<h2 class="text-3xl font-bold tracking-tight">Y方向漂移抑制</h2>
+</div>
+<p class="text-zinc-500 max-w-3xl mb-8 leading-relaxed">无侧向惩罚时，求解器利用体轴耦合（俯仰-滚转-偏航相互作用）降低电池消耗，产生 y ∈ [−4.98, +2.95] m 的 S 形曲线——±8 m 的侧向摆幅。在目标函数中加入二次 y² 软惩罚后，仅以 1.2% 的成本增幅实现了超过 50 倍的侧摆抑制。</p>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+<figure><img src="fig_y_comparison.png" style="width:100%;display:block" alt="Y-drift comparison"><figcaption>图 6：y(t) 惩罚前后对比——峰值抑制 43.6 倍</figcaption></figure>
+<figure><img src="fig3_3d_trajectory.png" style="width:100%;display:block" alt="3D trajectory"><figcaption>图 7：3D 轨迹——等轴缩放 + 对称 y 轴范围</figcaption></figure>
+</div>
+
+<div class="overflow-x-auto mb-6">
+<table class="w-full text-xs">
+<thead><tr class="border-b border-white/10"><th class="text-left py-3 px-3 font-medium text-zinc-400">指标</th><th class="text-left py-3 px-3 font-medium text-zinc-400">无惩罚</th><th class="text-left py-3 px-3 font-medium text-zinc-400">有惩罚 (wy=0.01)</th><th class="text-left py-3 px-3 font-medium text-zinc-400">改善</th></tr></thead>
+<tbody class="divide-y divide-white/5">
+<tr><td class="py-3 px-3">|y| 最大值</td><td class="py-3 px-3 text-zinc-400">4.98 m</td><td class="py-3 px-3 text-zinc-400">0.11 m</td><td class="py-3 px-3 text-emerald-400">43.6 倍</td></tr>
+<tr><td class="py-3 px-3">Δy (摆幅)</td><td class="py-3 px-3 text-zinc-400">7.93 m</td><td class="py-3 px-3 text-zinc-400">0.16 m</td><td class="py-3 px-3 text-emerald-400">50.3 倍</td></tr>
+<tr><td class="py-3 px-3">目标增幅</td><td class="py-3 px-3 text-zinc-400">—</td><td class="py-3 px-3 text-zinc-400">+1.2%</td><td class="py-3 px-3 text-zinc-400">极小</td></tr>
+</tbody>
+</table></div>
+
+<div class="gc p-6">
+<p class="text-sm text-zinc-400"><span class="font-semibold text-white">调参说明：</span>权重 wy = 1.0 会导致求解器在原点附近停滞（x ≈ 0）。wy = 0.01 实现了最优平衡——充分抑制漂移的同时不限制前向运动。独立验证脚本（<span class="mi">test_step2a.py</span>、<span class="mi">test_step2b.py</span>）确认每步收敛后再交付。</p>
+</div>
+<div class="sd"></div>
+</section>
+
+<!-- 7. 最终轨迹指标 -->
+<section id="results" style="padding-top:6rem;margin-bottom:4rem" data-observe>
+<div class="flex items-center gap-3 mb-8">
+<span class="pt bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">§6</span>
+<h2 class="text-3xl font-bold tracking-tight">最终轨迹指标</h2>
+</div>
+<p class="text-zinc-500 max-w-3xl mb-8 leading-relaxed">收敛后的轨迹满足所有约束条件——包括地面起始（z = 0）、紧 ω̇ 边界和最小侧向漂移——同时在 500 m / 305 m 爬升任务中保留了 97.2% 的电量 SOC。</p>
+
+<div class="overflow-x-auto mb-8">
+<table class="w-full text-xs">
+<thead><tr class="border-b border-white/10"><th class="text-left py-3 px-3 font-medium text-zinc-400">参数</th><th class="text-left py-3 px-3 font-medium text-zinc-400">数值</th><th class="text-left py-3 px-3 font-medium text-zinc-400">状态</th></tr></thead>
+<tbody class="divide-y divide-white/5">
+<tr><td class="py-3 px-3">初始高度</td><td class="py-3 px-3 text-zinc-400">z = 0.0 m</td><td class="py-3 px-3"><span class="pt bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[.6rem]">OK</span></td></tr>
+<tr><td class="py-3 px-3">终端位置</td><td class="py-3 px-3 text-zinc-400">x = 500 m, z = −305 m</td><td class="py-3 px-3"><span class="pt bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[.6rem]">OK</span></td></tr>
+<tr><td class="py-3 px-3">电池 SOC</td><td class="py-3 px-3 text-zinc-400">97.2%</td><td class="py-3 px-3"><span class="pt bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[.6rem]">OK</span></td></tr>
+<tr><td class="py-3 px-3">总时间</td><td class="py-3 px-3 text-zinc-400">41.0 s</td><td class="py-3 px-3"><span class="pt bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[.6rem]">OK</span></td></tr>
+<tr><td class="py-3 px-3">最大 ω̇</td><td class="py-3 px-3 text-zinc-400">P1=83, P2=27, P3=16, P4=5, P5=21</td><td class="py-3 px-3"><span class="pt bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[.6rem]">OK</span></td></tr>
+<tr><td class="py-3 px-3">边界跳变</td><td class="py-3 px-3 text-zinc-400">1–11 rad/s</td><td class="py-3 px-3"><span class="pt bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[.6rem]">OK</span></td></tr>
+<tr><td class="py-3 px-3">最大速度</td><td class="py-3 px-3 text-zinc-400">19.6 m/s</td><td class="py-3 px-3"><span class="pt bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[.6rem]">OK</span></td></tr>
+<tr><td class="py-3 px-3">最大电池电流</td><td class="py-3 px-3 text-zinc-400">3471 A</td><td class="py-3 px-3"><span class="pt bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[.6rem]">OK</span></td></tr>
+<tr><td class="py-3 px-3">Y漂移摆幅</td><td class="py-3 px-3 text-zinc-400">0.16 m</td><td class="py-3 px-3"><span class="pt bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[.6rem]">OK</span></td></tr>
+</tbody>
+</table></div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+<figure><img src="fig5_soc_ib.png" style="width:100%;display:block" alt="SOC and battery current"><figcaption>图 8：电池 SOC 与电流曲线</figcaption></figure>
+<figure><img src="fig6_inertial_velocities.png" style="width:100%;display:block" alt="Inertial velocities"><figcaption>图 9：惯性系速度</figcaption></figure>
+</div>
+
+<div class="gc p-6 mb-10">
+<h3 class="text-sm font-semibold mb-3 text-white">关键设计决策总结</h3>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-zinc-400">
+<div><span class="font-medium text-white">递进式约束</span><br>ω̇ 边界 500 → 200 rad/s² 的热启动管道，防止 IPOPT 因不良初猜发散。</div>
+<div><span class="font-medium text-white">软惩罚 > 硬边界</span><br>y² 惩罚权重 0.01 在不增加会导致收敛停滞的侧向硬约束前提下实现漂移抑制。</div>
+<div><span class="font-medium text-white">独立验证</span><br>管道每步均通过独立测试脚本验证收敛，确认无误后再进入下一收紧阶段。</div>
+</div>
+</div>
+<div class="sd"></div>
+</section>
+
+<!-- 页脚 -->
+<footer class="pb-12 pt-8 text-center">
+<div class="text-xs text-zinc-600 max-w-lg mx-auto leading-relaxed mb-6">
+eVTOL 轨迹优化研究报告 · 2026-04-26<br>
+基于 CasADi &amp; IPOPT · 13 状态 / 6 控制 OCP · Direct Multiple Shooting<br>
+物理可行性基准 · 六旋翼 eVTOL 轨迹优化研究
+</div>
+<div class="flex items-center justify-center gap-4">
+<span class="text-xs text-zinc-700">最后更新：2026-04-26</span>
+<a href="#formulation" class="text-xs text-zinc-600 hover:text-zinc-400 transition-colors">返回顶部 ↑</a>
+</div>
+</footer>
+
+</div><!-- /.max-w-7xl -->
+
+<script>
+(function() {
+  const html = document.documentElement;
+  const tt = document.getElementById('tt');
+  const mi = document.getElementById('mi');
+  const si = document.getElementById('si');
+
+  function setDark(dark) {
+    if (dark) {
+      html.classList.add('dark');
+      html.style.background = '';
+      document.body.style.background = '';
+      mi.style.display = 'none';
+      si.style.display = 'block';
+    } else {
+      html.classList.remove('dark');
+      html.style.background = '#fafafa';
+      document.body.style.background = '#fafafa';
+      mi.style.display = 'block';
+      si.style.display = 'none';
+    }
+  }
+
+  if (localStorage.getItem('theme') === 'light') {
+    setDark(false);
+  }
+
+  tt.addEventListener('click', function() {
+    const isDark = html.classList.contains('dark');
+    setDark(!isDark);
+    localStorage.setItem('theme', isDark ? 'light' : 'dark');
+  });
+
+  // IntersectionObserver for fade-in animations
+  const obs = new IntersectionObserver(function(entries) {
+    entries.forEach(function(e) {
+      if (e.isIntersecting) {
+        e.target.style.animation = 'slideUp 0.6s cubic-bezier(.16,1,.3,1) forwards';
+        e.target.style.opacity = '1';
+        obs.unobserve(e.target);
+      }
+    });
+  }, { threshold: 0.1 });
+
+  document.querySelectorAll('[data-observe]').forEach(function(el) {
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(30px)';
+    obs.observe(el);
+  });
+})();
+</script>
+</body>
+</html>
